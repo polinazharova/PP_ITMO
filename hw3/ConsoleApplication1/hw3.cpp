@@ -265,18 +265,32 @@ int t4() {
 int main()
 {   
     setlocale(LC_ALL, "rus");
+    size_t choice = 1;
+    while (choice != 0) {
+        std::cout << "Номер задания: ";
+        std::cin >> choice;
 
-    std::cout << "///TASK 1///" << std::endl;
-    t1();
-
-    std::cout << "///TASK 2///" << std::endl;
-    t2();
-
-    std::cout << "///TASK 3///" << std::endl;
-    t3();
-
-    std::cout << "///TASK 4///" << std::endl;
-    t4();
+        switch (choice) {
+        case 1:
+            std::cout << "///TASK 1///" << std::endl;
+            t1();
+            break;
+        case 2:
+            std::cout << "///TASK 2///" << std::endl;
+            t2();
+            break;
+        case 3:
+            std::cout << "///TASK 3///" << std::endl;
+            t3();
+            break;
+        case 4:
+            std::cout << "///TASK 4///" << std::endl;
+            t4();
+            break;
+        default:
+            choice = 0;
+        }
+    }
 
     return 0;
 }
