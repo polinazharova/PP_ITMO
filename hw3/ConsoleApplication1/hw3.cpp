@@ -2,7 +2,7 @@
 #include <thread>
 #include <mutex>
 #include <random>
-
+#include <shared_mutex>
 
 std::mutex mtx;
 size_t N = 3;
@@ -21,15 +21,15 @@ void lines() {
 
 
 void maker(std::vector<int>& pool, int& goods) {
-    mtx.lock();
-    lines();
     std::mt19937 gen = hashRand(std::this_thread::get_id());
     std::uniform_int_distribution<> dis(0, 99);
 
+    std::lock_guard<std::mutex> lock(mtx);
     goods = rand() % 4;
     while (pool.size() > N - goods) {
         pool.erase(pool.begin());
     }
+    lines();
     std::cout << "Я ПОЛОЖИЛ " << goods << " ТОВАРОВ: ";
     for (int i{ 0 }; i < goods; i++) {
         pool.push_back(rand() % 100);
@@ -37,26 +37,22 @@ void maker(std::vector<int>& pool, int& goods) {
     }
     std::cout << std::endl;
     lines();
-    mtx.unlock();
 }
 
 void consumer(std::vector<int>& pool, const int& goods) {
-    mtx.lock();
     lines();
-
     if (goods < 0) {
         std::cout << "Кажется, производитель еще не привез товар..." << std::endl;
+        return;
     }
-    else {
-        std::cout << "Я ЗАБРАЛ " << goods << " ТОВАРОВ: ";
-        for (int i{ 0 }; i < goods; i++) {
-            std::cout << pool[pool.size() - 1] << " ";
-            pool.pop_back();      
-        }
-        std::cout << std::endl;
+    std::lock_guard<std::mutex> lock(mtx);
+    std::cout << "Я ЗАБРАЛ " << goods << " ТОВАРОВ: ";
+    for (int i{ 0 }; i < goods; i++) {
+        std::cout << pool[pool.size() - 1] << " ";
+        pool.pop_back();      
     }
+    std::cout << std::endl;
     lines();
-    mtx.unlock();
 }
 
 int t1() {
@@ -72,20 +68,20 @@ int t1() {
     return 0;
 }
 
+std::shared_mutex shr_mtx;
 
 void writer(std::vector<int>& pool, int& books) {
-    mtx.lock();
-    lines();
 
     std::mt19937 gen = hashRand(std::this_thread::get_id());
     std::uniform_int_distribution<> dis(0, 99);
     
-
+    std::lock_guard<std::shared_mutex> lock(shr_mtx);
     books = dis(gen) % (N * 2);
     while (pool.size() > (N * 2) - books) {
         pool.erase(pool.begin());
     }
 
+    lines();
     std::cout << "Я НАПИСАЛ " << books << " КНИГ: ";
     for (int i{ 0 }; i < books; i++) {
         pool.push_back(dis(gen));
@@ -93,33 +89,31 @@ void writer(std::vector<int>& pool, int& books) {
     }
     std::cout << std::endl;
     lines();
-    mtx.unlock();
 }
 
 void reader(std::vector<int>& pool, int& books) {
-    mtx.lock();
-    lines();
     if (pool.size() <= 0) {
         std::cout << "Пока что читать нечего..." << std::endl;
+        return;
     }
-    else {
-        std::mt19937 gen = hashRand(std::this_thread::get_id());
-        std::uniform_int_distribution<> dis(0, 99);
+    std::mt19937 gen = hashRand(std::this_thread::get_id());
+    std::uniform_int_distribution<> dis(0, 99);
 
-        books = dis(gen) % (N * 2);
-        std::cout << "Я ХОЧУ ПРОЧИТАТЬ " << books << " КНИГ" << std::endl;
-        if (books > pool.size()) {
-            books = pool.size();
-        }
-        std::cout << "Я ПРОЧИТАЛ " << books << " КНИГ: ";
-        for (int i{ 0 }; i < books; i++) {
-            int taken = dis(gen) % pool.size();
-            std::cout << pool[taken] << " ";
-        }
-        std::cout << std::endl;
-    }
+    std::shared_lock<std::shared_mutex> shr_lock(shr_mtx);
+
+    books = dis(gen) % (N * 2);
     lines();
-    mtx.unlock();
+    std::cout << "Я ХОЧУ ПРОЧИТАТЬ " << books << " КНИГ" << std::endl;
+    if (books > pool.size()) {
+        books = pool.size();
+    }
+    std::cout << "Я ПРОЧИТАЛ " << books << " КНИГ: ";
+    for (int i{ 0 }; i < books; i++) {
+        int taken = dis(gen) % pool.size();
+        std::cout << pool[taken] << " ";
+    }
+    std::cout << std::endl;
+    lines();
 }
 
 int t2() {
@@ -144,33 +138,26 @@ int t2() {
 }
 
 std::vector<std::mutex> mtxs(5);
-void ph_forks(const int ph_id, std::mutex& m1, std::mutex& m2, const int thinker) {
-    if (thinker == ph_id) {
-        std::cout << "ФИЛОСОФ " << ph_id + 1 << " ЗАДУМАЛСЯ" << std::endl;
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    }
-    m2.lock();
+void ph_forks(const int ph_id, std::mutex& m1, std::mutex& m2) {
+    std::unique_lock<std::mutex> lock1(m1, std::defer_lock);
+    std::unique_lock<std::mutex> lock2(m2, std::defer_lock);
+    std::lock(lock1, lock2);
+;
     std::cout << "ФИЛОСОФ " << ph_id + 1 << " ВЗЯЛ ПРАВУЮ ВИЛКУ" << std::endl;
-    m1.lock();
     std::cout << "ФИЛОСОФ " << ph_id + 1 << " ВЗЯЛ ЛЕВУЮ ВИЛКУ" << std::endl;
-    lines();
     std::cout << "ФИЛОСОФ " << ph_id + 1 << " ЕСТ" << std::endl;
     std::cout << "ФИЛОСОФ " << ph_id + 1 << " ДОЕЛ" << std::endl;
-
-    m2.unlock();
-    m1.unlock();
 }
 
 int t3() {
     std::mt19937 gen = hashRand(std::this_thread::get_id());
     std::uniform_int_distribution<> dis(0, 99);
-    int thinker = dis(gen) % 5;
 
-    std::thread p0(ph_forks, 0, std::ref(mtxs[4]), std::ref(mtxs[0]), thinker);
-    std::thread p1(ph_forks, 1, std::ref(mtxs[0]), std::ref(mtxs[1]), thinker);
-    std::thread p2(ph_forks, 2, std::ref(mtxs[1]), std::ref(mtxs[2]), thinker);
-    std::thread p3(ph_forks, 3, std::ref(mtxs[2]), std::ref(mtxs[3]), thinker);
-    std::thread p4(ph_forks, 4, std::ref(mtxs[3]), std::ref(mtxs[4]), thinker);
+    std::thread p0(ph_forks, 0, std::ref(mtxs[4]), std::ref(mtxs[0]));
+    std::thread p1(ph_forks, 1, std::ref(mtxs[0]), std::ref(mtxs[1]));
+    std::thread p2(ph_forks, 2, std::ref(mtxs[1]), std::ref(mtxs[2]));
+    std::thread p3(ph_forks, 3, std::ref(mtxs[2]), std::ref(mtxs[3]));
+    std::thread p4(ph_forks, 4, std::ref(mtxs[3]), std::ref(mtxs[4]));
 
     
     p0.join();

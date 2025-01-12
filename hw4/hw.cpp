@@ -4,15 +4,16 @@
 #include <ctime>
 #include <condition_variable>
 #include <mutex>
+#include <atomic>
 
-std::mutex mtx;
 std::condition_variable cv;
 
 class ArrayThread {
 private:
 	std::vector<int> arr;
-	bool running = false;
-	bool pending = false;
+	std::atomic<bool> _isActive = false;
+	std::mutex _mtx;
+	std::thread _th;
 protected:
 	void init_gen(size_t n) {
 		for (size_t i{ 0 }; i < n; i++) {
@@ -21,26 +22,16 @@ protected:
 	}
 
 	void print() {
-		std::unique_lock<std::mutex> lock(mtx);
-		while (true) {
-			std::cout << "Çàïóùåí" << std::endl;
-			while (running) {
-				tm time = current_time();
-				std::cout << "TIME:" << std::endl;
-				std::cout << "HOURS: " << time.tm_hour << " MINUTES: " << time.tm_min << " SECONDS: " << time.tm_sec << std::endl;
+	std::unique_lock<std::mutex> lock(_mtx);
+	std::cout << "Çàïóùåí" << std::endl;
+		while (_isActive) {
+			tm time = current_time();
+			std::cout << "TIME:" << std::endl;
+			std::cout << "HOURS: " << time.tm_hour << " MINUTES: " << time.tm_min << " SECONDS: " << time.tm_sec << std::endl;
 
-				std::cout << "ARRAY SUM:" << std::endl;
-				std::cout << arr_sum() << std::endl;
-				std::this_thread::sleep_for(std::chrono::seconds(5));
-			}
-			std::cout << "Îñòàíîâëåí" << std::endl;
-			pending = true;
-			cv.wait(lock);
-			if (!running) {
-				std::cout << "Âûêëþ÷åí" << std::endl;
-				pending = false;
-				break;
-			}
+			std::cout << "ARRAY SUM:" << std::endl;
+			std::cout << arr_sum() << std::endl;
+			cv.wait_for(lock, std::chrono::seconds(30));
 		}
 	}
 public:
@@ -52,7 +43,6 @@ public:
 		init_gen(n);
 	}
 
-	bool get_pending() { return pending; }
 
 	void addElem(int elem, size_t pos) {
 		if (pos > this->arr.size()) {
@@ -86,23 +76,23 @@ public:
 	}
 
 	void stop_printing() {
-		running = false;
+		if (!_isActive) {
+			return;
+		}
+		_isActive = false;
 		cv.notify_one();
+		if (_th.joinable()) {
+			_th.join();
+		}
 	}
 
 	void start_printing() {
-		if (!pending) {
-			running = true;
-			print();
+		if (_isActive) {
+			return;
 		}
-		else {
-			pending = false;
-			running = true;
-			cv.notify_one();
-		}
+		_isActive = true;
+		_th = std::thread(&ArrayThread::print, this);
 	}
-
-	bool get_print_status() { return running; }
 };
 
 int main() {
@@ -110,9 +100,6 @@ int main() {
 	srand(time(NULL));
 
 	ArrayThread arr(10);
-	std::thread thr(&ArrayThread::start_printing, &arr);
-
-	std::this_thread::sleep_for(std::chrono::seconds(1));
 
 	std::cout << "ÂÛ ÌÎÆÅÒÅ:" << std::endl;
 	std::cout << "1 - ÄÎÁÀÂÈÒÜ ÝËÅÌÅÍÒ Â ÌÀÑÑÈÂ" << std::endl;
@@ -133,12 +120,7 @@ int main() {
 			arr.removeElem(rand() % 10);
 			break;
 		case 3:
-			if (arr.get_print_status()) {
-				std::cout << "ÓÆÅ ÇÀÏÓÙÅÍ!" << std::endl;
-			}
-			else { 
-				arr.start_printing();
-			}
+			arr.start_printing();
 			break;
 		case 4:
 			arr.stop_printing();
@@ -149,10 +131,6 @@ int main() {
 			break;
 		}
 	}
-
-	while (!arr.get_pending()) {}
-	arr.stop_printing();
-	thr.join();
 
 	return 0;
 }
